@@ -1,12 +1,20 @@
 /*
   By Patrik Hermansson
 
+  Sensor for Emoncms network. This device is mounted outdoor at the electricity meter pole.
+  Sensors used:
+  -BMP180, air pressure, I2C.
+  -HTU21D, humidity/temperature, I2C.
+  -PT333, phototransistor reading the led on the electricity meter.
+  -Voltage divider on A0 reading the solar cell voltage.
+  -Battery voltage monitored internally. (http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
+  
+
   Uses a Atmega328 bootloaded as a Arduino Mini Pro. Uses a 8 MHz crystal to 
   be able to run down to 2.4 volts. 
   Power supply is a LiFePo4 charged by a solar cell, parts taken from a garden solar
   cell lamp. 
-  A voltage divider connected to A0 monitors the solar cell voltage.
-  The battery voltage is monitored in the MCU, http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
+  , http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
   
   
   Based on "emonTX LowPower Temperature Example"
