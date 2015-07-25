@@ -3,12 +3,14 @@
 
   Sensor for Emoncms network. This device is mounted outdoor at the electricity meter pole.
   Sensors used:
-  -BMP180, air pressure, I2C.
+  -BMP180, air pressure/temperature, I2C.
+      Code uses Sparkfuns lib for BMP180, https://learn.sparkfun.com/tutorials/bmp180-barometric-pressure-sensor-hookup-?_ga=1.148112447.906958391.1421739042
+      
   -HTU21D, humidity/temperature, I2C.
   -PT333, phototransistor reading the led on the electricity meter.
   -Voltage divider on A0 reading the solar cell voltage.
   -Battery voltage monitored internally. (http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
-  
+ 
 
   Uses a Atmega328 bootloaded as a Arduino Mini Pro. Uses a 8 MHz crystal to 
   be able to run down to 2.4 volts. 
@@ -28,15 +30,12 @@
 
   Libraries in the standard arduino libraries folder:
 	- JeeLib		https://github.com/jcw/jeelib
-        - DHT22 Humidity        https://github.com/adafruit/DHT-sensor-library - be sure to rename the sketch folder to remove the '-'
-
-
- 
+       
 */
 
-#define RF_freq RF12_433MHZ                                                // Frequency of RF12B module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. You should use the one matching the module you have.
-const int nodeID = 23;                                                  // emonTx RFM12B node ID - should be unique on network, see recomended node ID range below
-const int networkGroup = 210;                                           // emonTx RFM12B wireless network group - needs to be same as emonBase and emonGLCD
+#define RF_freq RF12_433MHZ   // Frequency of RF12B module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. You should use the one matching the module you have.
+const int nodeID = 23;        // emonTx RFM12B node ID - should be unique on network, see recomended node ID range below
+const int networkGroup = 210; // emonTx RFM12B wireless network group - needs to be same as emonBase and emonGLCD
 
 /*Recommended node ID allocation
 ------------------------------------------------------------------------------------------------------------
@@ -52,7 +51,7 @@ const int networkGroup = 210;                                           // emonT
 */
                                            
 //const int time_between_readings= 60000;                                  //60s in ms - FREQUENCY OF READINGS 
-const int time_between_readings= 3000;                                  //60s in ms - FREQUENCY OF READINGS 
+const int time_between_readings= 20000;                                  //60s in ms - FREQUENCY OF READINGS 
 #define RF69_COMPAT 0 // set to 1 to use RFM69CW 
 #include <JeeLib.h>   // make sure V12 (latest) is used if using RFM69CW
 #include <avr/sleep.h>
@@ -60,18 +59,24 @@ ISR(WDT_vect) { Sleepy::watchdogEvent(); }                              // Attac
 
 // Solar cell monitor
 int sensorPin = A0;    // select the input pin for the potentiometer
-int sensorValue = 0;  // variable to store the value coming from the sensor
-float volt;
+float r1 = 1000000; // Resistor between Vcc and A0
+float r2 = 470000;  // Resistor between A0 and Gnd
 
+// BMP180
+#include <SFE_BMP180.h>
+#include <Wire.h>
+SFE_BMP180 pressure;
+#define ALTITUDE 54.0 // Altitude of Såtenäs (my location) in meters
+
+
+// Payload to send to bae
 typedef struct {
   	  int temp;
       int humidity;                                  
-	    int battery;		                                      
+	    long battery;	
+      int solarvolt;	                                      
 } Payload;
 Payload emontx;
-
-int oldtemp, oldhumidity, oldbattery;
-boolean firstrun = true;
 
 void setup() {
   Serial.begin(57600);
@@ -90,54 +95,124 @@ void setup() {
   rf12_control(0xC040);                                                 // set low-battery level to 2.2V i.s.o. 3.1V
   delay(10);
   rf12_sleep(RF12_SLEEP);
+
+  // Initialize the BMP180 (it is important to get calibration values stored on the device).
+  if (pressure.begin())
+    Serial.println("BMP180 init success");
+  else
+  {
+    // Oops, something went wrong, this is usually a connection problem,
+    // see the comments at the top of this sketch for the proper connections.
+
+    Serial.println("BMP180 init fail\n\n");
+    while(1); // Pause forever.
+  }
+  Serial.println ("Setup done");
 }
 
 void loop()
 { 
+  // For BMP180
+  char status;
+  double T,P,p0,a;
+  
   // Read battery voltage
   long batt = readVcc();
-  Serial.print ("readVcc: ");
+  Serial.print ("Battery: ");
   Serial.print (batt);
-  Serial.println("V");
+  Serial.println(" volt.");
   
   // Read solar cell voltage
-  sensorValue = analogRead(sensorPin);
-  delay(10);
-  volt = sensorValue * (3.32 / 1023.0);
+  // Read A0 and calculate value
+  float v = (analogRead(sensorPin) * batt) / 1024.0;
+  int solarvolt = v / (r2 / (r1 + r2));
 
-  // Raw values
   Serial.print ("Solar cell = ");
-  Serial.print (volt);
-  Serial.print (" V, AD = ");
-  Serial.println (sensorValue);
-  
-  emontx.battery = (int) (volt*100);
+  Serial.print (solarvolt);
+  Serial.println (" volt.");
+
+  // Air pressure, you must read the BMP180:s temp too.
+  status = pressure.startTemperature();
+  if (status != 0)
+  {
+    // Wait for the measurement to complete:
+    delay(status);
+
+    // Retrieve the completed temperature measurement:
+    // Note that the measurement is stored in the variable T.
+    // Function returns 1 if successful, 0 if failure.
+
+    status = pressure.getTemperature(T);
+    if (status != 0)
+    {
+      // Print out the measurement:
+      Serial.print("temperature: ");
+      Serial.print(T,2);
+      Serial.println(" deg C, ");
+      
+      // Start a pressure measurement:
+      // The parameter is the oversampling setting, from 0 to 3 (highest res, longest wait).
+      // If request is successful, the number of ms to wait is returned.
+      // If request is unsuccessful, 0 is returned.
+
+      status = pressure.startPressure(3);
+      if (status != 0)
+      {
+        // Wait for the measurement to complete:
+        delay(status);
+
+        // Retrieve the completed pressure measurement:
+        // Note that the measurement is stored in the variable P.
+        // Note also that the function requires the previous temperature measurement (T).
+        // (If temperature is stable, you can do one temperature measurement for a number of pressure measurements.)
+        // Function returns 1 if successful, 0 if failure.
+
+        status = pressure.getPressure(P,T);
+        if (status != 0)
+        {
+          // Print out the measurement:
+          //Serial.print("absolute pressure: ");
+          //Serial.print(P,2);
+          //Serial.println(" mb/hPa");
+
+          // The pressure sensor returns abolute pressure, which varies with altitude.
+          // To remove the effects of altitude, use the sealevel function and your current altitude.
+          // This number is commonly used in weather reports.
+          // Parameters: P = absolute pressure in mb, ALTITUDE = current altitude in m.
+          // Result: p0 = sea-level compensated pressure in mb
+
+          p0 = pressure.sealevel(P,ALTITUDE); // we're at 1655 meters (Boulder, CO)
+          Serial.print("relative (sea-level) pressure: ");
+          Serial.print(p0,2);
+          Serial.println(" mb/hPa");
+        }
+        else Serial.println("error retrieving pressure measurement\n");
+      }
+      else Serial.println("error starting pressure measurement\n");
+    }
+    else Serial.println("error retrieving temperature measurement\n");
+  }
+  else Serial.println("error starting temperature measurement\n");
+
+
+  // Add values to emontx payload
+  emontx.temp=T;
+  emontx.humidity=p0;
+  emontx.battery = batt;
+  emontx.solarvolt = solarvolt;
   
   delay(10);
   
-  // Print results on serial port...
-  Serial.print("Battery = ");
-  Serial.println(emontx.battery );
-  delay(5);
-
-  
-   // check if returns are valid, if they are NaN (not a number) then something went wrong!
-  //if (isnan(emontx.temp) || isnan(emontx.humidity)) {
-  //  Serial.println("Failed to read from DHT");}
-  //  else
-  //  {
-      
-      rf12_sleep(RF12_WAKEUP);
-      // if ready to send + exit loop if it gets stuck as it seems too
-      int i = 0; while (!rf12_canSend() && i<10) {rf12_recvDone(); i++;}
-      rf12_sendStart(0, &emontx, sizeof emontx);
-      // set the sync mode to 2 if the fuses are still the Arduino default
-      // mode 3 (full powerdown) can only be used with 258 CK startup fuses
-      rf12_sendWait(2);
-      rf12_sleep(RF12_SLEEP); 
-      delay(50);
-   // }
-    
+  // Send to emonbase    
+  rf12_sleep(RF12_WAKEUP);
+  // if ready to send + exit loop if it gets stuck as it seems too
+  int i = 0; while (!rf12_canSend() && i<10) {rf12_recvDone(); i++;}
+  rf12_sendStart(0, &emontx, sizeof emontx);
+  // set the sync mode to 2 if the fuses are still the Arduino default
+  // mode 3 (full powerdown) can only be used with 258 CK startup fuses
+  rf12_sendWait(2);
+  rf12_sleep(RF12_SLEEP); 
+  delay(50);  
   Sleepy::loseSomeTime(time_between_readings);
 }
 
@@ -169,6 +244,10 @@ internal1.1Ref = 1.1 * Vcc1 (per voltmeter) / Vcc2 (per readVcc() function)
 scale_constant = internal1.1Ref * 1023 * 1000 
 11.76846 * 1023 * 1000 = 12039134 ? 
 Use calibration value determined by trial and error instead.
+
+With solar call:
+Vcc read 3286
+DVM 3.27
 */ 
   long result = (high<<8) | low;
   result = 1147000L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
