@@ -8,6 +8,7 @@
       
   -HTU21D, humidity/temperature, I2C.
   -PT333, phototransistor reading the led on the electricity meter.
+  -DS18B20, temperature, mounted at a good(external) location
   -Voltage divider on A0 reading the solar cell voltage.
   -Battery voltage monitored internally. (http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
  
@@ -71,7 +72,9 @@ SFE_BMP180 pressure;
 
 // Payload to send to bae
 typedef struct {
-  	  int temp;
+  	  int DStemp;
+      int BMPtemp;
+      int HTUtemp;
       int humidity;                                  
 	    long battery;	
       int solarvolt;	                                      
@@ -115,6 +118,7 @@ void loop()
   // For BMP180
   char status;
   double T,P,p0,a;
+  int iBMPtemp, iBMPpres;
   
   // Read battery voltage
   long batt = readVcc();
@@ -146,9 +150,14 @@ void loop()
     if (status != 0)
     {
       // Print out the measurement:
-      Serial.print("temperature: ");
+      Serial.print("BMP180 temperature: ");
       Serial.print(T,2);
       Serial.println(" deg C, ");
+      // Convert to int
+      double T2=T*100; // Preserve decimals
+      iBMPtemp = (int) T2;
+      Serial.print("BMP180 temp as int:");
+      Serial.println(iBMPtemp);
       
       // Start a pressure measurement:
       // The parameter is the oversampling setting, from 0 to 3 (highest res, longest wait).
@@ -185,6 +194,11 @@ void loop()
           Serial.print("relative (sea-level) pressure: ");
           Serial.print(p0,2);
           Serial.println(" mb/hPa");
+
+          // Convert to int
+          iBMPpres = (int) p0;
+          Serial.print("Pressure as int:");
+          Serial.println(iBMPpres);
         }
         else Serial.println("error retrieving pressure measurement\n");
       }
@@ -196,8 +210,10 @@ void loop()
 
 
   // Add values to emontx payload
-  emontx.temp=T;
-  emontx.humidity=p0;
+  emontx.DStemp=0;          // Temp from the DS18B20
+  emontx.BMPtemp=iBMPtemp;  // Temp from the BMP180
+  emontx.HTUtemp=0;         // Temp from the HTU21D
+  emontx.humidity=iBMPpres; 
   emontx.battery = batt;
   emontx.solarvolt = solarvolt;
   
