@@ -4,13 +4,14 @@
   Sensor for Emoncms network. This device is mounted outdoor at the electricity meter pole.
   Sensors used:
   -BMP180, air pressure/temperature, I2C.
-      Code uses Sparkfuns lib for BMP180, https://learn.sparkfun.com/tutorials/bmp180-barometric-pressure-sensor-hookup-?_ga=1.148112447.906958391.1421739042
-      
+     Code uses Sparkfuns lib for BMP180, https://learn.sparkfun.com/tutorials/bmp180-barometric-pressure-sensor-hookup-?_ga=1.148112447.906958391.1421739042
   -HTU21D, humidity/temperature, I2C.
+     https://learn.sparkfun.com/tutorials/htu21d-humidity-sensor-hookup-guide/htu21d-overview
   -PT333, phototransistor reading the led on the electricity meter.
-  -DS18B20, temperature, mounted at a good(external) location
+  -xxx, temperature, mounted at a good(external) location
   -Voltage divider on A0 reading the solar cell voltage.
-  -Battery voltage monitored internally. (http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
+  -Battery voltage monitored internally. 
+     http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
  
 
   Uses a Atmega328 bootloaded as a Arduino Mini Pro. Uses a 8 MHz crystal to 
@@ -31,7 +32,11 @@
 
   Libraries in the standard arduino libraries folder:
 	- JeeLib		https://github.com/jcw/jeelib
-       
+
+
+   Reminder for Github:
+   git commit EmontxV2.ino
+   git push origin master
 */
 
 #define RF_freq RF12_433MHZ   // Frequency of RF12B module can be RF12_433MHZ, RF12_868MHZ or RF12_915MHZ. You should use the one matching the module you have.
@@ -51,8 +56,8 @@ const int networkGroup = 210; // emonTx RFM12B wireless network group - needs to
 -------------------------------------------------------------------------------------------------------------
 */
                                            
-//const int time_between_readings= 60000;                                  //60s in ms - FREQUENCY OF READINGS 
-const int time_between_readings= 20000;                                  //60s in ms - FREQUENCY OF READINGS 
+const int time_between_readings= 120000;                                  //120s in ms - FREQUENCY OF READINGS 
+//const int time_between_readings= 20000;                                  //20s in ms - FREQUENCY OF READINGS 
 #define RF69_COMPAT 0 // set to 1 to use RFM69CW 
 #include <JeeLib.h>   // make sure V12 (latest) is used if using RFM69CW
 #include <avr/sleep.h>
@@ -69,14 +74,18 @@ float r2 = 470000;  // Resistor between A0 and Gnd
 SFE_BMP180 pressure;
 #define ALTITUDE 54.0 // Altitude of Såtenäs (my location) in meters
 
+// HTU21D
+#include "SparkFunHTU21D.h"
+//Create an instance of the object
+HTU21D htu21d;
 
 // Payload to send to bae
 typedef struct {
-  	  int DStemp;
-      int BMPtemp;
+  	  int BMPtemp;
       int HTUtemp;
+      int pressure;
       int humidity;                                  
-	    long battery;	
+	    int battery;	
       int solarvolt;	                                      
 } Payload;
 Payload emontx;
@@ -109,6 +118,9 @@ void setup() {
 
     Serial.println("BMP180 init fail\n\n");
     while(1); // Pause forever.
+
+    // Init humidity sensor
+    htu21d.begin();
   }
   Serial.println ("Setup done");
 }
@@ -208,12 +220,21 @@ void loop()
   }
   else Serial.println("error starting temperature measurement\n");
 
+  // Read humidity sensor
+  float humd = htu21d.readHumidity();
+  float htutemp = htu21d.readTemperature();
 
+  Serial.print("Humidity:");
+  Serial.println(humd);
+
+  Serial.print("HTD Temp :");
+  Serial.println(htutemp);
+  
   // Add values to emontx payload
-  emontx.DStemp=0;          // Temp from the DS18B20
-  emontx.BMPtemp=iBMPtemp;  // Temp from the BMP180
-  emontx.HTUtemp=0;         // Temp from the HTU21D
-  emontx.humidity=iBMPpres; 
+  emontx.BMPtemp=iBMPtemp;      // Temp from the BMP180
+  emontx.HTUtemp=htutemp*100;   // Temp from the HTU21D
+  emontx.pressure=iBMPpres;
+  emontx.humidity=humd; 
   emontx.battery = batt;
   emontx.solarvolt = solarvolt;
   
