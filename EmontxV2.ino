@@ -1,14 +1,17 @@
+
 /*
   By Patrik Hermansson
 
   Sensor for Emoncms network. This device is mounted outdoor at the electricity meter pole.
   Sensors used:
   -BMP180, air pressure/temperature, I2C.
-     Code uses Sparkfuns lib for BMP180, https://learn.sparkfun.com/tutorials/bmp180-barometric-pressure-sensor-hookup-?_ga=1.148112447.906958391.1421739042
-  -HTU21D, humidity/temperature, I2C.
+     Code uses Sparkfuns lib for BMP180, 
+     https://learn.sparkfun.com/tutorials/bmp180-barometric-pressure-sensor-hookup-?_ga=1.148112447.906958391.1421739042
+  -HTU21D, humidity/temperature, I2C. Mounted at a good(external) location.
      https://learn.sparkfun.com/tutorials/htu21d-humidity-sensor-hookup-guide/htu21d-overview
   -PT333, phototransistor reading the led on the electricity meter.
-  -xxx, temperature, mounted at a good(external) location
+  -ML8511 UV index sensor.
+  -
   -Voltage divider on A0 reading the solar cell voltage.
   -Battery voltage monitored internally. 
      http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
@@ -18,7 +21,6 @@
   be able to run down to 2.4 volts. 
   Power supply is a LiFePo4 charged by a solar cell, parts taken from a garden solar
   cell lamp. 
-  , http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
   
   
   Based on "emonTX LowPower Temperature Example"
@@ -78,18 +80,30 @@ SFE_BMP180 pressure;
 #include "SparkFunHTU21D.h"
 //Create an instance of the object
 HTU21D htu21d;
+// Wire.h is already included
 
-// Payload to send to bae
+// ML8511 
+int mlOutPin = A1;
+int mlEnPin = 5;
+
+// Payload to send to base. Split in two to avoid max packet length limit.
 typedef struct {
   	  int BMPtemp;
-      int HTUtemp;
-      int pressure;
-      int humidity;                                  
-	    int battery;	
-      int solarvolt;	                                      
+//  	  int HTUtemp;
+  	  unsigned int pressure;
+  	  int humidity;
+  	  int battery;     
+      int solarvolt;   
+      float uvIntensity;                                      
 } Payload;
 Payload emontx;
-
+/*
+typedef struct {             
+      int battery;  
+      
+} Payload2;
+Payload2 emontx2;
+*/
 void setup() {
   Serial.begin(57600);
   Serial.println("PH emonTX v2"); 
@@ -107,6 +121,15 @@ void setup() {
   rf12_control(0xC040);                                                 // set low-battery level to 2.2V i.s.o. 3.1V
   delay(10);
   rf12_sleep(RF12_SLEEP);
+
+  // ML8511
+  pinMode(mlOutPin, INPUT);
+  pinMode(mlEnPin, OUTPUT);
+
+  // Is battery voltage low?
+  int lobat = rf12_lowbat();
+  Serial.print ("Battery low ");
+  Serial.println(lobat); 
 
   // Initialize the BMP180 (it is important to get calibration values stored on the device).
   if (pressure.begin())
@@ -147,6 +170,31 @@ void loop()
   Serial.print (solarvolt);
   Serial.println (" volt.");
 
+
+  // UV-value
+  // ML8511 
+  // int mlOutPin = A1;
+  // int mlEnPin = 5;
+  digitalWrite(mlEnPin, HIGH);   // Enable sensor
+  delay(100);
+  float uv = (analogRead(mlOutPin) * batt) / 1024.0;
+  int uv_raw = analogRead(mlOutPin);
+  digitalWrite(mlEnPin, LOW);   // Disable sensor
+
+  // Inspired by https://github.com/sparkfun/ML8511_Breakout/blob/master/firmware/MP8511_Read_Example/MP8511_Read_Example.ino
+  float outputVoltage = 3.3 / batt * uv_raw;
+  float uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
+  Serial.print("MP8511 output: ");
+  Serial.println(uv_raw);
+
+  Serial.print(" MP8511 voltage: ");
+  Serial.println(outputVoltage);
+
+  Serial.print(" UV Intensity (mW/cm^2): ");
+  Serial.println(uvIntensity);
+  Serial.print("UV raw (ML8511 output voltage): ");
+  Serial.println(uv);
+
   // Air pressure, you must read the BMP180:s temp too.
   status = pressure.startTemperature();
   if (status != 0)
@@ -167,9 +215,9 @@ void loop()
       Serial.println(" deg C, ");
       // Convert to int
       double T2=T*100; // Preserve decimals
-      iBMPtemp = (int) T2;
-      Serial.print("BMP180 temp as int:");
-      Serial.println(iBMPtemp);
+      //iBMPtemp = (int) T2;
+      //Serial.print("BMP180 temp as int:");
+      //Serial.println(iBMPtemp);
       
       // Start a pressure measurement:
       // The parameter is the oversampling setting, from 0 to 3 (highest res, longest wait).
@@ -208,9 +256,9 @@ void loop()
           Serial.println(" mb/hPa");
 
           // Convert to int
-          iBMPpres = (int) p0;
-          Serial.print("Pressure as int:");
-          Serial.println(iBMPpres);
+          //iBMPpres = (int) p0;
+          //Serial.print("Pressure as int:");
+          //Serial.println(iBMPpres);
         }
         else Serial.println("error retrieving pressure measurement\n");
       }
@@ -222,21 +270,36 @@ void loop()
 
   // Read humidity sensor
   float humd = htu21d.readHumidity();
+  int ihumd = (int) (humd * 10);  // Preserve one decimal by multiplication
   float htutemp = htu21d.readTemperature();
+  int ihtutemp = (int) (htutemp * 100);
 
+  /*
   Serial.print("Humidity:");
   Serial.println(humd);
-
+  Serial.print(ihumd);
+  Serial.println(" (as int)");
+  
   Serial.print("HTD Temp :");
   Serial.println(htutemp);
-  
+  Serial.print(ihtutemp);
+  Serial.println(" (as int)");
+  */
   // Add values to emontx payload
-  emontx.BMPtemp=iBMPtemp;      // Temp from the BMP180
-  emontx.HTUtemp=htutemp*100;   // Temp from the HTU21D
-  emontx.pressure=iBMPpres;
-  emontx.humidity=humd; 
-  emontx.battery = batt;
-  emontx.solarvolt = solarvolt;
+  emontx.BMPtemp= (int) (T*10);      // Temp from the BMP180
+  //emontx.HTUtemp=ihtutemp;   // Temp from the HTU21D
+  emontx.pressure=int (p0);
+  emontx.humidity=int (htutemp); 
+  emontx.battery = int (batt);
+  emontx.solarvolt = int (solarvolt);
+  emontx.uvIntensity = int (uvIntensity*100);
+
+/*
+  Serial.print("emontx.BMPtemp: ");
+  Serial.println(emontx.BMPtemp);
+  Serial.print("emontx.pressure: ");
+  Serial.println(emontx.pressure);
+*/
   
   delay(10);
   
@@ -250,6 +313,16 @@ void loop()
   rf12_sendWait(2);
   rf12_sleep(RF12_SLEEP); 
   delay(50);  
+  
+  // Payload 2
+//  i = 0; while (!rf12_canSend() && i<10) {rf12_recvDone(); i++;}
+//  rf12_sendStart(0, &emontx2, sizeof emontx2);
+  // set the sync mode to 2 if the fuses are still the Arduino default
+  // mode 3 (full powerdown) can only be used with 258 CK startup fuses
+//  rf12_sendWait(2);
+//  rf12_sleep(RF12_SLEEP); 
+//  delay(50);  
+  
   Sleepy::loseSomeTime(time_between_readings);
 }
 
@@ -289,4 +362,11 @@ DVM 3.27
   long result = (high<<8) | low;
   result = 1147000L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
   return result; // Vcc in millivolts
+}
+
+//The Arduino Map function but for floats
+//From: http://forum.arduino.cc/index.php?topic=3922.0
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
+{
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
