@@ -10,8 +10,8 @@
   -HTU21D, humidity/temperature, I2C. Mounted at a good(external) location.
      https://learn.sparkfun.com/tutorials/htu21d-humidity-sensor-hookup-guide/htu21d-overview
   -PT333, phototransistor reading the led on the electricity meter.
-  -ML8511 UV index sensor.
-  -
+  -ML8511 UV index sensor. - NOT USED
+  -UVI-01 UV sensor. http://www.reyax.com/httpdocs/index.files/OTHER_Module.htm#REYAX%20UVI-01
   -Voltage divider on A0 reading the solar cell voltage.
   -Battery voltage monitored internally. 
      http://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/)
@@ -83,8 +83,10 @@ HTU21D htu21d;
 // Wire.h is already included
 
 // ML8511 
-int mlOutPin = A1;
-int mlEnPin = 5;
+// int mlOutPin = A1;
+// int mlEnPin = 5;
+// UVI-01
+int uvipin = A1;
 
 // Payload to send to base. Split in two to avoid max packet length limit.
 typedef struct {
@@ -123,8 +125,8 @@ void setup() {
   rf12_sleep(RF12_SLEEP);
 
   // ML8511
-  pinMode(mlOutPin, INPUT);
-  pinMode(mlEnPin, OUTPUT);
+  //pinMode(mlOutPin, INPUT);
+  //pinMode(mlEnPin, OUTPUT);
 
   // Is battery voltage low?
   int lobat = rf12_lowbat();
@@ -143,6 +145,7 @@ void setup() {
     while(1); // Pause forever.
 
     // Init humidity sensor
+    Serial.println("HTU21 init");
     htu21d.begin();
   }
   Serial.println ("Setup done");
@@ -170,18 +173,23 @@ void loop()
   Serial.print (solarvolt);
   Serial.println (" volt.");
 
-
   // UV-value
+  int uv_raw = analogRead(uvipin);
+  float uv = (uv_raw * batt) / 1024.0;
+  Serial.print("UV sensor raw value = ");
+  Serial.println(uv_raw);
+
   // ML8511 
   // int mlOutPin = A1;
   // int mlEnPin = 5;
-  digitalWrite(mlEnPin, HIGH);   // Enable sensor
-  delay(100);
-  float uv = (analogRead(mlOutPin) * batt) / 1024.0;
-  int uv_raw = analogRead(mlOutPin);
-  digitalWrite(mlEnPin, LOW);   // Disable sensor
+  //digitalWrite(mlEnPin, HIGH);   // Enable sensor
+  //delay(100);
+  //float uv = (analogRead(mlOutPin) * batt) / 1024.0;
+  //int uv_raw = analogRead(mlOutPin);
+  //digitalWrite(mlEnPin, LOW);   // Disable sensor
 
   // Inspired by https://github.com/sparkfun/ML8511_Breakout/blob/master/firmware/MP8511_Read_Example/MP8511_Read_Example.ino
+/*
   float outputVoltage = 3.3 / batt * uv_raw;
   float uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
   Serial.print("MP8511 output: ");
@@ -194,8 +202,9 @@ void loop()
   Serial.println(uvIntensity);
   Serial.print("UV raw (ML8511 output voltage): ");
   Serial.println(uv);
-
+*/
   // Air pressure, you must read the BMP180:s temp too.
+  Serial.println("Measure BMP180 temp and air pressure");
   status = pressure.startTemperature();
   if (status != 0)
   {
@@ -273,7 +282,8 @@ void loop()
   int ihumd = (int) (humd * 10);  // Preserve one decimal by multiplication
   float htutemp = htu21d.readTemperature();
   int ihtutemp = (int) (htutemp * 100);
-
+  Serial.print("Humidity = ");
+  Serial.println(humd);
   /*
   Serial.print("Humidity:");
   Serial.println(humd);
@@ -292,7 +302,7 @@ void loop()
   emontx.humidity=int (htutemp); 
   emontx.battery = int (batt);
   emontx.solarvolt = int (solarvolt);
-  emontx.uvIntensity = int (uvIntensity*100);
+  emontx.uvIntensity = int (uv_raw);
 
 /*
   Serial.print("emontx.BMPtemp: ");
