@@ -2,6 +2,8 @@
 /*
   By Patrik Hermansson
 
+  Latest version: https://github.com/bphermansson/emontxv2
+
   Sensor for Emoncms network. This device is mounted outdoor at the electricity meter pole.
   Sensors used:
   -BMP180, air pressure/temperature, I2C.
